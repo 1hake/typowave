@@ -321,8 +321,8 @@ export const DEFAULT_CONFIG: TypowaveConfig = {
   autoTransition: false,
   transitionInterval: 30,
   beatTransition: true,
-  beatsPerTransition: 16,
-  beatThreshold: 1.4,
+  beatsPerTransition: 1,
+  beatThreshold: 1.3,
 };
 
 const STORAGE_KEY = "typowave-config";

@@ -50,8 +50,11 @@ export default function Home() {
     const engine = audioEngineRef.current;
     if (!engine) return;
 
-    const unsubscribe = engine.onBeat((bpm, beatCount) => {
+    let localBeatCount = 0;
+
+    const unsubscribe = engine.onBeat((bpm) => {
       setCurrentBpm(bpm);
+      localBeatCount++;
 
       // Flash indicator
       setBeatFlash(true);
@@ -60,16 +63,22 @@ export default function Home() {
       const cfg = configRef.current;
       if (!cfg || !cfg.beatTransition) return;
 
-      // Transition every N beats
-      if (beatCount % cfg.beatsPerTransition === 0 && beatCount > 0) {
+      // Transition every N beats (default 1 = every beat)
+      if (localBeatCount % cfg.beatsPerTransition === 0) {
         const total = cfg.scenes.length;
-        const next = (sceneIndexRef.current + 1) % total;
+        // Pick a random scene that's different from current
+        let next: number;
+        if (total <= 1) {
+          next = 0;
+        } else {
+          do {
+            next = Math.floor(Math.random() * total);
+          } while (next === sceneIndexRef.current);
+        }
         sceneIndexRef.current = next;
         setConfig((prev) => {
           if (!prev) return prev;
-          const updated = { ...prev, activeSceneIndex: next };
-          saveConfig(updated);
-          return updated;
+          return { ...prev, activeSceneIndex: next };
         });
       }
     });

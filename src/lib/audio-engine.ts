@@ -22,8 +22,8 @@ export class AudioEngine {
   private _beatCount = 0;
   private _bpm = 0;
   private _isBeat = false;
-  private _beatCooldownMs = 150; // min ms between beats
-  private _beatThreshold = 1.4; // energy must exceed avg * threshold
+  private _beatCooldownMs = 120; // min ms between beats (~200bpm max)
+  private _beatThreshold = 1.3; // energy must exceed avg * threshold
 
   get frequencyData(): Uint8Array<ArrayBuffer> { return this._frequencyData; }
   get timeDomainData(): Uint8Array<ArrayBuffer> { return this._timeDomainData; }
@@ -114,12 +114,12 @@ export class AudioEngine {
     const energy = this.getAverageFrequency(0, 0.12);
     this._isBeat = false;
 
-    // Keep a rolling window of energy values (~0.5s at 60fps = 30 frames)
+    // Rolling window of energy values (~0.4s at 60fps = 24 frames)
     this._energyHistory.push(energy);
-    if (this._energyHistory.length > 30) this._energyHistory.shift();
+    if (this._energyHistory.length > 24) this._energyHistory.shift();
 
-    // Need enough history
-    if (this._energyHistory.length < 10) return;
+    // Need minimal history before detecting
+    if (this._energyHistory.length < 4) return;
 
     // Average energy over the window
     const avg = this._energyHistory.reduce((a, b) => a + b, 0) / this._energyHistory.length;
