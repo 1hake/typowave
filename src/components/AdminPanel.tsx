@@ -11,6 +11,8 @@ import {
   createDefaultBlock,
   PRESET_SCENES,
   makeBlockId,
+  generateRandomScene,
+  generateSceneBatch,
 } from "@/lib/config";
 
 interface AdminPanelProps {
@@ -21,6 +23,7 @@ interface AdminPanelProps {
   onStartMic: () => void;
   onStartSystem: () => void;
   onStopAudio: () => void;
+  currentBpm: number;
 }
 
 function Section({
@@ -359,6 +362,7 @@ export default function AdminPanel({
   onStartMic,
   onStartSystem,
   onStopAudio,
+  currentBpm,
 }: AdminPanelProps) {
   const activeScene = config.scenes[config.activeSceneIndex];
 
@@ -468,6 +472,52 @@ export default function AdminPanel({
           </div>
         </Section>
 
+        {/* BPM Display */}
+        {currentBpm > 0 && (
+          <div className="border-b border-black/10 pb-3 mb-3">
+            <div className="flex items-center justify-between">
+              <span className="text-[28px] font-mono font-bold tabular-nums">{currentBpm}</span>
+              <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-black/40">BPM</span>
+            </div>
+          </div>
+        )}
+
+        {/* Beat Transition */}
+        <Section title="Beat Sync">
+          <label className="flex items-center justify-between text-[11px] cursor-pointer">
+            <span className="text-black/50">Change scene on beat</span>
+            <div
+              onClick={() => updateConfig({ beatTransition: !config.beatTransition })}
+              className={`w-8 h-4 rounded-full relative transition-colors ${config.beatTransition ? "bg-black" : "bg-black/15"}`}
+            >
+              <div className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform ${config.beatTransition ? "translate-x-4" : "translate-x-0.5"}`} />
+            </div>
+          </label>
+          {config.beatTransition && (
+            <>
+              <Slider
+                label="Beats/trans."
+                value={config.beatsPerTransition}
+                min={1}
+                max={64}
+                step={1}
+                onChange={(v) => updateConfig({ beatsPerTransition: v })}
+              />
+              <Slider
+                label="Threshold"
+                value={config.beatThreshold}
+                min={1.1}
+                max={3}
+                step={0.05}
+                onChange={(v) => updateConfig({ beatThreshold: v })}
+              />
+              <p className="text-[9px] text-black/25 mt-1">
+                Lower threshold = more sensitive beat detection. Transition every {config.beatsPerTransition} beat{config.beatsPerTransition > 1 ? "s" : ""}.
+              </p>
+            </>
+          )}
+        </Section>
+
         {/* Global */}
         <Section title="Global">
           <Slider
@@ -505,7 +555,27 @@ export default function AdminPanel({
               </button>
             ))}
           </div>
-          <div className="flex gap-1">
+          <div className="flex flex-wrap gap-1">
+            <button
+              onClick={() => {
+                const newScene = generateRandomScene();
+                const scenes = [...config.scenes, newScene];
+                updateConfig({ scenes, activeSceneIndex: scenes.length - 1 });
+              }}
+              className="px-2 py-1 text-[10px] font-bold text-black/60 hover:text-black bg-black/5 rounded"
+            >
+              + Random
+            </button>
+            <button
+              onClick={() => {
+                const batch = generateSceneBatch(10);
+                const scenes = [...config.scenes, ...batch];
+                updateConfig({ scenes });
+              }}
+              className="px-2 py-1 text-[10px] text-black/40 hover:text-black bg-black/5 rounded"
+            >
+              + 10 Random
+            </button>
             <button
               onClick={duplicateScene}
               className="px-2 py-1 text-[10px] text-black/40 hover:text-black bg-black/5 rounded"

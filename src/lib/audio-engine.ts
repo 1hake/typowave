@@ -1,3 +1,5 @@
+export type BeatCallback = (bpm: number, beatCount: number) => void;
+
 export class AudioEngine {
   private audioContext: AudioContext | null = null;
   private analyser: AnalyserNode | null = null;
@@ -6,22 +8,43 @@ export class AudioEngine {
   private _frequencyData: Uint8Array<ArrayBuffer> = new Uint8Array(0);
   private _timeDomainData: Uint8Array<ArrayBuffer> = new Uint8Array(0);
 
-  // Smoothed values for visual use
+  // Smoothed values
   private _smoothBass = 0;
   private _smoothMids = 0;
   private _smoothHighs = 0;
   private _smoothVolume = 0;
 
-  get frequencyData(): Uint8Array<ArrayBuffer> {
-    return this._frequencyData;
+  // Beat detection
+  private _beatCallbacks: BeatCallback[] = [];
+  private _energyHistory: number[] = [];
+  private _beatTimes: number[] = [];
+  private _lastBeatTime = 0;
+  private _beatCount = 0;
+  private _bpm = 0;
+  private _isBeat = false;
+  private _beatCooldownMs = 150; // min ms between beats
+  private _beatThreshold = 1.4; // energy must exceed avg * threshold
+
+  get frequencyData(): Uint8Array<ArrayBuffer> { return this._frequencyData; }
+  get timeDomainData(): Uint8Array<ArrayBuffer> { return this._timeDomainData; }
+  get isActive(): boolean { return this.audioContext !== null && this.audioContext.state === "running"; }
+  get bass(): number { return this._smoothBass; }
+  get mids(): number { return this._smoothMids; }
+  get highs(): number { return this._smoothHighs; }
+  get volume(): number { return this._smoothVolume; }
+  get bpm(): number { return this._bpm; }
+  get beatCount(): number { return this._beatCount; }
+  get isBeat(): boolean { return this._isBeat; }
+
+  onBeat(cb: BeatCallback) {
+    this._beatCallbacks.push(cb);
+    return () => {
+      this._beatCallbacks = this._beatCallbacks.filter((c) => c !== cb);
+    };
   }
 
-  get timeDomainData(): Uint8Array<ArrayBuffer> {
-    return this._timeDomainData;
-  }
-
-  get isActive(): boolean {
-    return this.audioContext !== null && this.audioContext.state === "running";
+  setBeatThreshold(value: number) {
+    this._beatThreshold = Math.max(1.05, Math.min(3, value));
   }
 
   async startMicrophone(): Promise<void> {
@@ -82,6 +105,63 @@ export class AudioEngine {
     this._smoothMids += (this.getRawMids() - this._smoothMids) * lerp;
     this._smoothHighs += (this.getRawHighs() - this._smoothHighs) * lerp;
     this._smoothVolume += (this.getRawVolume() - this._smoothVolume) * lerp;
+
+    this.detectBeat();
+  }
+
+  private detectBeat() {
+    // Use bass + low-mids energy for beat detection (kick drums live here)
+    const energy = this.getAverageFrequency(0, 0.12);
+    this._isBeat = false;
+
+    // Keep a rolling window of energy values (~0.5s at 60fps = 30 frames)
+    this._energyHistory.push(energy);
+    if (this._energyHistory.length > 30) this._energyHistory.shift();
+
+    // Need enough history
+    if (this._energyHistory.length < 10) return;
+
+    // Average energy over the window
+    const avg = this._energyHistory.reduce((a, b) => a + b, 0) / this._energyHistory.length;
+
+    const now = performance.now();
+    const timeSinceLastBeat = now - this._lastBeatTime;
+
+    // Beat = current energy exceeds avg by threshold AND cooldown has passed
+    if (energy > avg * this._beatThreshold && timeSinceLastBeat > this._beatCooldownMs && energy > 0.05) {
+      this._isBeat = true;
+      this._beatCount++;
+      this._lastBeatTime = now;
+
+      // Track beat times for BPM calculation
+      this._beatTimes.push(now);
+      // Keep last 12 beats for BPM averaging
+      if (this._beatTimes.length > 12) this._beatTimes.shift();
+
+      this.calculateBPM();
+
+      // Fire callbacks
+      for (const cb of this._beatCallbacks) {
+        cb(this._bpm, this._beatCount);
+      }
+    }
+  }
+
+  private calculateBPM() {
+    if (this._beatTimes.length < 3) return;
+
+    // Calculate intervals between consecutive beats
+    const intervals: number[] = [];
+    for (let i = 1; i < this._beatTimes.length; i++) {
+      intervals.push(this._beatTimes[i] - this._beatTimes[i - 1]);
+    }
+
+    // Filter out outliers (intervals too short or too long for music: 40-220 BPM = 273-1500ms)
+    const valid = intervals.filter((ms) => ms >= 273 && ms <= 1500);
+    if (valid.length < 2) return;
+
+    const avgInterval = valid.reduce((a, b) => a + b, 0) / valid.length;
+    this._bpm = Math.round(60000 / avgInterval);
   }
 
   private getAverageFrequency(startRatio: number, endRatio: number): number {
@@ -97,11 +177,6 @@ export class AudioEngine {
   private getRawMids(): number { return this.getAverageFrequency(0.08, 0.4); }
   private getRawHighs(): number { return this.getAverageFrequency(0.4, 1); }
   private getRawVolume(): number { return this.getAverageFrequency(0, 1); }
-
-  get bass(): number { return this._smoothBass; }
-  get mids(): number { return this._smoothMids; }
-  get highs(): number { return this._smoothHighs; }
-  get volume(): number { return this._smoothVolume; }
 
   getBand(band: string): number {
     switch (band) {
@@ -127,5 +202,12 @@ export class AudioEngine {
     this._smoothMids = 0;
     this._smoothHighs = 0;
     this._smoothVolume = 0;
+    this._energyHistory = [];
+    this._beatTimes = [];
+    this._lastBeatTime = 0;
+    this._beatCount = 0;
+    this._bpm = 0;
+    this._isBeat = false;
+    this._beatCallbacks = [];
   }
 }

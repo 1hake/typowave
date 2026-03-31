@@ -10,7 +10,17 @@ export default function Home() {
   const [config, setConfig] = useState<TypowaveConfig | null>(null);
   const [showAdmin, setShowAdmin] = useState(true);
   const [audioActive, setAudioActive] = useState(false);
+  const [currentBpm, setCurrentBpm] = useState(0);
+  const [beatFlash, setBeatFlash] = useState(false);
   const audioEngineRef = useRef<AudioEngine | null>(null);
+  const configRef = useRef<TypowaveConfig | null>(null);
+  const sceneIndexRef = useRef(0);
+
+  // Keep refs in sync with state
+  useEffect(() => {
+    configRef.current = config;
+    if (config) sceneIndexRef.current = config.activeSceneIndex;
+  }, [config]);
 
   useEffect(() => {
     setConfig(loadConfig());
@@ -34,6 +44,45 @@ export default function Home() {
     },
     [config, handleConfigChange]
   );
+
+  // Beat callback — wired once, reads from refs to avoid stale closures
+  useEffect(() => {
+    const engine = audioEngineRef.current;
+    if (!engine) return;
+
+    const unsubscribe = engine.onBeat((bpm, beatCount) => {
+      setCurrentBpm(bpm);
+
+      // Flash indicator
+      setBeatFlash(true);
+      setTimeout(() => setBeatFlash(false), 80);
+
+      const cfg = configRef.current;
+      if (!cfg || !cfg.beatTransition) return;
+
+      // Transition every N beats
+      if (beatCount % cfg.beatsPerTransition === 0 && beatCount > 0) {
+        const total = cfg.scenes.length;
+        const next = (sceneIndexRef.current + 1) % total;
+        sceneIndexRef.current = next;
+        setConfig((prev) => {
+          if (!prev) return prev;
+          const updated = { ...prev, activeSceneIndex: next };
+          saveConfig(updated);
+          return updated;
+        });
+      }
+    });
+
+    return unsubscribe;
+  }, [audioActive]); // re-subscribe when audio starts/stops
+
+  // Sync beat threshold to engine
+  useEffect(() => {
+    if (config && audioEngineRef.current) {
+      audioEngineRef.current.setBeatThreshold(config.beatThreshold);
+    }
+  }, [config?.beatThreshold]);
 
   const handleStartMic = useCallback(async () => {
     const engine = audioEngineRef.current;
@@ -61,12 +110,12 @@ export default function Home() {
     audioEngineRef.current?.stop();
     audioEngineRef.current = new AudioEngine();
     setAudioActive(false);
+    setCurrentBpm(0);
   }, []);
 
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
       if (e.target !== document.body) return;
-
       switch (e.code) {
         case "Space":
           e.preventDefault();
@@ -91,14 +140,14 @@ export default function Home() {
     return () => window.removeEventListener("keydown", handleKey);
   }, [navigateScene]);
 
-  // Auto transition between scenes
+  // Timer-based auto transition (fallback if not using beat)
   useEffect(() => {
-    if (!config?.autoTransition) return;
+    if (!config?.autoTransition || config.beatTransition) return;
     const interval = setInterval(() => {
       navigateScene(1);
     }, config.transitionInterval * 1000);
     return () => clearInterval(interval);
-  }, [config?.autoTransition, config?.transitionInterval, navigateScene]);
+  }, [config?.autoTransition, config?.beatTransition, config?.transitionInterval, navigateScene]);
 
   // Update audio engine smoothing
   useEffect(() => {
@@ -119,22 +168,43 @@ export default function Home() {
         sensitivity={config.sensitivity}
       />
 
-      {/* Scene indicator */}
-      <div className="fixed bottom-4 left-4 z-40 flex items-center gap-2">
-        {config.scenes.map((_, i) => (
-          <button
-            key={i}
-            onClick={() => handleConfigChange({ ...config, activeSceneIndex: i })}
-            className={`w-1.5 h-1.5 rounded-full transition-all ${
-              i === config.activeSceneIndex
-                ? "bg-current scale-150"
-                : "bg-current opacity-20"
-            }`}
+      {/* Beat flash overlay */}
+      {beatFlash && (
+        <div
+          className="fixed inset-0 pointer-events-none z-30 transition-opacity"
+          style={{
+            backgroundColor: activeScene.textColor,
+            opacity: 0.03,
+          }}
+        />
+      )}
+
+      {/* BPM + Scene indicator */}
+      <div className="fixed bottom-4 left-4 z-40 flex items-center gap-3">
+        {currentBpm > 0 && (
+          <span
+            className="text-[11px] font-mono uppercase tracking-wider opacity-30 tabular-nums"
             style={{ color: activeScene.textColor }}
-          />
-        ))}
+          >
+            {currentBpm} BPM
+          </span>
+        )}
+        <div className="flex items-center gap-1.5">
+          {config.scenes.map((_, i) => (
+            <button
+              key={i}
+              onClick={() => handleConfigChange({ ...config, activeSceneIndex: i })}
+              className={`w-1 h-1 rounded-full transition-all ${
+                i === config.activeSceneIndex
+                  ? "bg-current scale-[2]"
+                  : "bg-current opacity-15"
+              }`}
+              style={{ color: activeScene.textColor }}
+            />
+          ))}
+        </div>
         <span
-          className="ml-2 text-[10px] font-mono uppercase tracking-wider opacity-20"
+          className="text-[10px] font-mono uppercase tracking-wider opacity-15"
           style={{ color: activeScene.textColor }}
         >
           {activeScene.name}
@@ -159,6 +229,7 @@ export default function Home() {
           onStartMic={handleStartMic}
           onStartSystem={handleStartSystem}
           onStopAudio={handleStopAudio}
+          currentBpm={currentBpm}
         />
       )}
 

@@ -40,6 +40,9 @@ export interface TypowaveConfig {
   smoothing: number;
   autoTransition: boolean;
   transitionInterval: number; // seconds
+  beatTransition: boolean; // transition scenes on beat
+  beatsPerTransition: number; // how many beats between transitions
+  beatThreshold: number; // sensitivity of beat detection (1.1 - 3.0)
 }
 
 let blockCounter = 0;
@@ -66,7 +69,139 @@ export function createDefaultBlock(partial?: Partial<TextBlock>): TextBlock {
   };
 }
 
-// ── Preset scenes inspired by reference images ──
+// ── Random layout generator ──
+
+const WORD_POOLS = {
+  headlines: [
+    "CHAOS", "SOUND", "WAVE", "PULSE", "DRIFT", "ECHO", "FORM", "VOID",
+    "FLUX", "TONE", "NOISE", "BEAT", "FLOW", "SHARP", "BOLD", "TYPE",
+    "GRID", "BREAK", "FRAME", "SHIFT", "BLOOM", "CLASH", "DEPTH", "EDGE",
+    "GLOW", "HAZE", "LIGHT", "MOVE", "OPEN", "PLAY", "RISE", "SYNC",
+    "ZERO", "AXIS", "BLUR", "CODE", "DROP", "FUSE", "GAIN", "HOOK",
+    "APEX", "BASS", "CORE", "DARK", "EXIT", "FADE", "HEAT", "IRON",
+    "JAZZ", "KEEN", "LUSH", "MINT", "NOVA", "OMIT", "PEAK", "RAVE",
+  ],
+  phrases: [
+    "SELECTED WORKS", "ARCHIVE 001", "NEW COLLECTION", "CREATIVE DIRECTION",
+    "ART & DESIGN", "VISUAL IDENTITY", "NO. 08 \u2014 NEW", "VOLUME II",
+    "THE MOST BEAUTIFUL\nTHINGS BEGIN IN CHAOS", "BOUNDARIES BETWEEN\nFASHION & ART",
+    "HAVE BECOME\nBLURRED", "RELEASED ON\n31.03.2026", "PORTFOLIO\nARCHIVE 0024",
+    "TONE OF VOICE", "SOCIAL MEDIA\nPRINT DIRECTION", "BRAND IDENTITY",
+    "EXPERIMENTAL\nTYPOGRAPHY", "LISTEN\nCAREFULLY", "FORM\nFOLLOWS\nSOUND",
+    "DIGITAL\nSURFACE", "SOUND\nDESIGN", "VISUAL\nNARRATIVE",
+    "ABSTRACT\nCOMPOSITION", "MOTION\nGRAPHICS", "INFINITE\nLOOP",
+  ],
+  metadata: [
+    "( version1_new )", "untitled_01.ai", "proposal_final.pdf",
+    "SIZE: 3 390 655 538 bytes", "CREATED: 8 Nov 2022  08:49",
+    "MODIFIED: 31 Mar 2026  14:22", "( 38 ) items", "No. 08 \u2014 new",
+    "Curated by Chroma Studio", "Author: Emily Harper",
+    "FREQ: 44.1kHz  DEPTH: 24bit", "BPM: \u2588\u2588\u2588 SYNC",
+    "CH: L+R  GAIN: 0dB", "duration: 03:42", "track_07_master.wav",
+    "export_final_v3.pdf", "SAMPLE RATE: 48000", "( stereo )",
+    "rev. 2026-03-31", "build: 0.9.1-beta",
+  ],
+  numbers: ["(38)", "(01)", "(99)", "001", "024", "18\u201324*", "2022\u20132026", "No. 7", "\u00a7 12", "Vol. III"],
+  punctuation: ["(            )", "\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014", "\u2022", "+", "\u00d7", "/", "::"],
+};
+
+const LIGHT_BGS = ["#ffffff", "#f5f5f5", "#f0ede8", "#fafaf8", "#f2f0eb", "#e8e6e1", "#f5f3ee"];
+const DARK_BGS = ["#0a0a0a", "#111111", "#0d0d0d", "#080808", "#0a0a0f", "#0f0a0a"];
+
+function pick<T>(arr: T[]): T { return arr[Math.floor(Math.random() * arr.length)]; }
+function rand(min: number, max: number): number { return min + Math.random() * (max - min); }
+function randInt(min: number, max: number): number { return Math.floor(rand(min, max)); }
+
+function randomReactions(): AudioReaction[] {
+  const reactions: AudioReaction[] = [];
+  const count = Math.random() < 0.3 ? 0 : Math.random() < 0.5 ? 1 : 2;
+  const bands: AudioBand[] = ["bass", "mids", "highs", "volume"];
+  const props: ReactProperty[] = ["scale", "letterSpacing", "opacity", "x", "y", "blur", "rotate"];
+  for (let i = 0; i < count; i++) {
+    reactions.push({
+      band: pick(bands),
+      property: pick(props),
+      intensity: Math.round(rand(0.2, 1.0) * 10) / 10,
+    });
+  }
+  return reactions;
+}
+
+export function generateRandomScene(name?: string): Scene {
+  const isDark = Math.random() < 0.3;
+  const bgColor = isDark ? pick(DARK_BGS) : pick(LIGHT_BGS);
+  const textColor = isDark ? "#f0ede8" : "#0a0a0a";
+
+  const blocks: TextBlock[] = [];
+
+  // 1-2 large headlines
+  const headlineCount = randInt(1, 3);
+  for (let i = 0; i < headlineCount; i++) {
+    const usePhrase = Math.random() < 0.4;
+    blocks.push(createDefaultBlock({
+      text: usePhrase ? pick(WORD_POOLS.phrases) : pick(WORD_POOLS.headlines),
+      x: rand(2, 50),
+      y: rand(2 + i * 25, 15 + i * 30),
+      fontSize: randInt(50, 140),
+      fontWeight: pick([100, 400, 700, 900]),
+      fontFamily: "sans",
+      letterSpacing: rand(-0.02, 0.15),
+      lineHeight: rand(0.95, 1.2),
+      color: textColor,
+      reactions: [
+        { band: "bass", property: pick(["letterSpacing", "scale"]), intensity: Math.round(rand(0.3, 0.9) * 10) / 10 },
+        ...randomReactions(),
+      ],
+    }));
+  }
+
+  // 2-5 medium text blocks
+  const medCount = randInt(2, 6);
+  for (let i = 0; i < medCount; i++) {
+    const isMeta = Math.random() < 0.5;
+    blocks.push(createDefaultBlock({
+      text: isMeta ? pick(WORD_POOLS.metadata) : pick(WORD_POOLS.phrases),
+      x: rand(2, 80),
+      y: rand(10, 90),
+      fontSize: isMeta ? randInt(10, 14) : randInt(14, 36),
+      fontWeight: isMeta ? 400 : pick([400, 700, 900]),
+      fontFamily: isMeta ? "mono" : "sans",
+      letterSpacing: isMeta ? rand(0.02, 0.1) : rand(-0.01, 0.05),
+      lineHeight: rand(1.1, 1.8),
+      color: isDark
+        ? (isMeta ? pick(["#555555", "#666666", "#444444"]) : textColor)
+        : (isMeta ? pick(["#999999", "#888888", "#777777"]) : textColor),
+      reactions: randomReactions(),
+    }));
+  }
+
+  // 0-2 decorative elements (numbers, punctuation)
+  const decoCount = randInt(0, 3);
+  for (let i = 0; i < decoCount; i++) {
+    const isNum = Math.random() < 0.6;
+    blocks.push(createDefaultBlock({
+      text: isNum ? pick(WORD_POOLS.numbers) : pick(WORD_POOLS.punctuation),
+      x: rand(3, 85),
+      y: rand(5, 90),
+      fontSize: isNum ? randInt(40, 90) : randInt(14, 30),
+      fontWeight: isNum ? pick([300, 400]) : 100,
+      fontFamily: Math.random() < 0.5 ? "mono" : "sans",
+      letterSpacing: rand(-0.02, 0.05),
+      color: isDark ? pick(["#333333", "#444444", textColor]) : pick(["#cccccc", "#aaaaaa", textColor]),
+      reactions: [{ band: "bass", property: "scale", intensity: Math.round(rand(0.3, 0.6) * 10) / 10 }],
+    }));
+  }
+
+  return {
+    id: `scene_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    name: name || pick(WORD_POOLS.headlines),
+    bgColor,
+    textColor,
+    blocks,
+  };
+}
+
+// ── Hand-crafted preset scenes ──
 
 const SCENE_CHAOS: Scene = {
   id: "scene_chaos",
@@ -160,12 +295,22 @@ const SCENE_MINIMAL: Scene = {
   ],
 };
 
-export const PRESET_SCENES: Scene[] = [
+export const HAND_CRAFTED_SCENES: Scene[] = [
   SCENE_CHAOS,
   SCENE_PORTFOLIO,
   SCENE_BOUNDARIES,
   SCENE_STUDIO,
   SCENE_MINIMAL,
+];
+
+// Generate a batch of random scenes
+export function generateSceneBatch(count: number): Scene[] {
+  return Array.from({ length: count }, () => generateRandomScene());
+}
+
+export const PRESET_SCENES: Scene[] = [
+  ...HAND_CRAFTED_SCENES,
+  ...generateSceneBatch(15),
 ];
 
 export const DEFAULT_CONFIG: TypowaveConfig = {
@@ -175,6 +320,9 @@ export const DEFAULT_CONFIG: TypowaveConfig = {
   smoothing: 0.82,
   autoTransition: false,
   transitionInterval: 30,
+  beatTransition: true,
+  beatsPerTransition: 16,
+  beatThreshold: 1.4,
 };
 
 const STORAGE_KEY = "typowave-config";
